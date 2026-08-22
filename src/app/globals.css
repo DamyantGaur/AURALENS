@@ -1,0 +1,324 @@
+@import "tailwindcss";
+
+/* ============================================
+   AuraLens — Dark Mode HUD Design System
+   ============================================ */
+
+@theme {
+  --color-hud-bg: oklch(0.13 0.02 260);
+  --color-hud-surface: oklch(0.18 0.02 260);
+  --color-hud-surface-elevated: oklch(0.22 0.02 260);
+  --color-hud-border: oklch(0.30 0.03 260);
+  --color-hud-border-glow: oklch(0.50 0.15 200);
+
+  --color-accent-cyan: oklch(0.78 0.15 200);
+  --color-accent-cyan-dim: oklch(0.55 0.12 200);
+  --color-accent-green: oklch(0.78 0.18 155);
+  --color-accent-red: oklch(0.65 0.22 25);
+  --color-accent-amber: oklch(0.78 0.16 80);
+  --color-accent-purple: oklch(0.68 0.18 300);
+
+  --color-text-primary: oklch(0.95 0.01 260);
+  --color-text-secondary: oklch(0.70 0.02 260);
+  --color-text-muted: oklch(0.50 0.02 260);
+}
+
+/* ============================================
+   Base Styles
+   ============================================ */
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--color-hud-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+/* ============================================
+   HUD Scanner Line Animation
+   ============================================ */
+
+@keyframes scanner-sweep {
+  0% { top: 0%; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+@keyframes fade-in-up {
+  0% { opacity: 0; transform: translateY(12px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes status-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* ============================================
+   Video Container & Canvas Overlay
+   ============================================ */
+
+.video-container {
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--color-hud-border);
+  box-shadow:
+    0 0 0 1px var(--color-hud-border),
+    0 0 30px -5px oklch(0.50 0.15 200 / 0.15),
+    0 20px 60px -15px oklch(0 0 0 / 0.5);
+  background: var(--color-hud-bg);
+}
+
+.video-container::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  padding: 1px;
+  background: linear-gradient(
+    135deg,
+    oklch(0.50 0.15 200 / 0.3),
+    transparent 50%,
+    oklch(0.50 0.15 200 / 0.1)
+  );
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.video-feed {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: cover;
+  background: black;
+}
+
+.detection-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.scanner-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-accent-cyan) 20%,
+    var(--color-accent-cyan) 80%,
+    transparent
+  );
+  box-shadow: 0 0 15px 3px oklch(0.78 0.15 200 / 0.4);
+  z-index: 6;
+  pointer-events: none;
+  animation: scanner-sweep 3s ease-in-out infinite;
+}
+
+/* ============================================
+   HUD Status Panel
+   ============================================ */
+
+.hud-panel {
+  background: oklch(0.15 0.02 260 / 0.85);
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  border: 1px solid var(--color-hud-border);
+  border-radius: 10px;
+  padding: 16px;
+  animation: fade-in-up 0.5s ease-out both;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.status-dot--active {
+  background: var(--color-accent-green);
+  box-shadow: 0 0 8px oklch(0.78 0.18 155 / 0.6);
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.status-dot--inactive {
+  background: var(--color-text-muted);
+}
+
+.status-dot--error {
+  background: var(--color-accent-red);
+  box-shadow: 0 0 8px oklch(0.65 0.22 25 / 0.6);
+  animation: status-blink 1s ease-in-out infinite;
+}
+
+.status-dot--loading {
+  background: var(--color-accent-amber);
+  box-shadow: 0 0 8px oklch(0.78 0.16 80 / 0.5);
+  animation: pulse-glow 1s ease-in-out infinite;
+}
+
+/* ============================================
+   Start Button
+   ============================================ */
+
+.btn-start {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 32px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-hud-bg);
+  background: linear-gradient(135deg, var(--color-accent-cyan), var(--color-accent-green));
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.btn-start::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, var(--color-accent-green), var(--color-accent-cyan));
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.btn-start:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 0 20px oklch(0.78 0.15 200 / 0.4),
+    0 8px 30px oklch(0 0 0 / 0.3);
+}
+
+.btn-start:hover::before {
+  opacity: 1;
+}
+
+.btn-start:active {
+  transform: translateY(0);
+}
+
+.btn-start:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-start span {
+  position: relative;
+  z-index: 1;
+}
+
+/* ============================================
+   Stats Display
+   ============================================ */
+
+.stat-value {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-accent-cyan);
+  line-height: 1;
+}
+
+.stat-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+/* ============================================
+   Corner Brackets (HUD Target Overlay)
+   ============================================ */
+
+.corner-brackets::after,
+.corner-brackets::before {
+  content: '';
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-color: var(--color-accent-cyan-dim);
+  border-style: solid;
+  pointer-events: none;
+  z-index: 7;
+  opacity: 0.6;
+}
+
+.corner-brackets::before {
+  top: 8px;
+  left: 8px;
+  border-width: 2px 0 0 2px;
+}
+
+.corner-brackets::after {
+  bottom: 8px;
+  right: 8px;
+  border-width: 0 2px 2px 0;
+}
+
+/* ============================================
+   Error Panel
+   ============================================ */
+
+.error-panel {
+  background: oklch(0.18 0.04 25 / 0.5);
+  border: 1px solid oklch(0.65 0.22 25 / 0.4);
+  border-radius: 10px;
+  padding: 16px 20px;
+  color: oklch(0.85 0.12 25);
+  font-size: 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  animation: fade-in-up 0.4s ease-out both;
+}
+
+/* ============================================
+   Responsive
+   ============================================ */
+
+@media (max-width: 640px) {
+  .hud-panel {
+    padding: 12px;
+  }
+
+  .stat-value {
+    font-size: 16px;
+  }
+
+  .btn-start {
+    padding: 12px 24px;
+    font-size: 13px;
+    width: 100%;
+    justify-content: center;
+  }
+}

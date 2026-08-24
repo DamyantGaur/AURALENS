@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useCallback, useState } from 'react';
-import type { Detection, DetectionResult, StatusMessage } from '@/workers/vision.worker';
+import { useEffect, useRef, useState } from 'react';
+import type { TrackedDetection } from '@/lib/temporalTracker';
+import type { DetectionResult, StatusMessage, DetectMessage } from '@/workers/vision.worker';
 
 // ─── Types ───
 export type ModelStatus = 'idle' | 'initializing' | 'ready' | 'error';
@@ -10,7 +11,7 @@ export interface UseDetectionLoopOptions {
   videoRef: React.RefObject<HTMLVideoElement | null>;
   isReady: boolean;
   enabled: boolean;
-  onDetections: (detections: Detection[], sourceWidth: number, sourceHeight: number) => void;
+  onDetections: (detections: TrackedDetection[], nativeWidth: number, nativeHeight: number) => void;
 }
 
 export interface UseDetectionLoopReturn {
@@ -20,7 +21,7 @@ export interface UseDetectionLoopReturn {
   inferenceTimeMs: number;
 }
 
-const DOWNSCALE_WIDTH = 480;
+const SQUARE_TARGET_SIZE = 512;
 
 export function useDetectionLoop({
   videoRef,
@@ -53,13 +54,20 @@ export function useDetectionLoop({
     );
     workerRef.current = worker;
 
+    // ─── Reusable OffscreenCanvas for letterboxing ───
+    let letterboxCanvas: OffscreenCanvas | null = null;
+    let letterboxCtx: OffscreenCanvasRenderingContext2D | null = null;
+
+    try {
+      letterboxCanvas = new OffscreenCanvas(SQUARE_TARGET_SIZE, SQUARE_TARGET_SIZE);
+      letterboxCtx = letterboxCanvas.getContext('2d', { willReadFrequently: true });
+    } catch {
+      // Fallback if OffscreenCanvas is unavailable
+    }
+
     // ─── FPS tracking ───
     let frameCount = 0;
     let lastFpsTime = performance.now();
-
-    // ─── Track downscaled frame dimensions to pass to renderer ───
-    let lastSourceWidth = DOWNSCALE_WIDTH;
-    let lastSourceHeight = 0;
 
     // ─── Handle messages from the worker ───
     worker.onmessage = (event: MessageEvent<DetectionResult | StatusMessage>) => {
@@ -84,10 +92,8 @@ export function useDetectionLoop({
       } else if (data.type === 'detections') {
         const result = data as DetectionResult;
 
-        // Update inference time
         setInferenceTimeMs(Math.round(result.inferenceTimeMs));
 
-        // FPS tracking
         frameCount++;
         const now = performance.now();
         if (now - lastFpsTime >= 1000) {
@@ -96,10 +102,14 @@ export function useDetectionLoop({
           lastFpsTime = now;
         }
 
-        // Forward detections to the rendering callback
-        onDetectionsRef.current(result.detections, lastSourceWidth, lastSourceHeight);
+        const video = videoRef.current;
+        const nativeW = video?.videoWidth || 640;
+        const nativeH = video?.videoHeight || 480;
 
-        // CRITICAL: Release the frame-lock so the next frame can be sent
+        // Forward stabilized detections directly in native video resolution
+        onDetectionsRef.current(result.detections, nativeW, nativeH);
+
+        // Release the frame-lock
         isProcessingRef.current = false;
       }
     };
@@ -107,35 +117,70 @@ export function useDetectionLoop({
     worker.onerror = (error) => {
       console.error('[useDetectionLoop] Worker error:', error);
       setModelStatus('error');
-      setModelMessage(`Worker crashed: ${error.message}`);
+      setModelMessage(`Worker error: ${error.message}`);
+      isProcessingRef.current = false;
     };
 
-    // ─── Frame-locked render loop ───
-    function renderLoop() {
+    // ─── Frame-locked render loop with Letterboxing ───
+    async function renderLoop() {
       const video = videoRef.current;
-      if (video && !video.paused && !video.ended && !isProcessingRef.current) {
+      if (
+        video &&
+        !video.paused &&
+        !video.ended &&
+        video.videoWidth > 0 &&
+        video.videoHeight > 0 &&
+        !isProcessingRef.current
+      ) {
         isProcessingRef.current = true;
 
-        // Downscale captured frame to 320px width for mobile performance
-        createImageBitmap(video, {
-          resizeWidth: DOWNSCALE_WIDTH,
-          resizeQuality: 'low',
-        })
-          .then((bitmap) => {
-            // Track the actual dimensions of the downscaled frame
-            lastSourceWidth = bitmap.width;
-            lastSourceHeight = bitmap.height;
+        try {
+          const Wv = video.videoWidth;
+          const Hv = video.videoHeight;
+          const S = SQUARE_TARGET_SIZE;
 
-            // Transfer bitmap ownership to the worker (zero-copy, instant GC on main thread)
-            worker.postMessage(
-              { type: 'detect', frame: bitmap, timestamp: performance.now() },
-              [bitmap]
-            );
-          })
-          .catch(() => {
-            // If createImageBitmap fails (e.g., video not ready), release lock
-            isProcessingRef.current = false;
-          });
+          // Aspect-ratio preserving scale and padding
+          const scale = Math.min(S / Wv, S / Hv);
+          const scaledW = Wv * scale;
+          const scaledH = Hv * scale;
+          const padX = (S - scaledW) / 2;
+          const padY = (S - scaledH) / 2;
+
+          let bitmap: ImageBitmap;
+
+          if (letterboxCtx && letterboxCanvas) {
+            // Draw into letterbox square with black bars
+            letterboxCtx.fillStyle = '#000000';
+            letterboxCtx.fillRect(0, 0, S, S);
+            letterboxCtx.drawImage(video, 0, 0, Wv, Hv, padX, padY, scaledW, scaledH);
+            bitmap = letterboxCanvas.transferToImageBitmap();
+          } else {
+            // Fallback: direct bitmap creation
+            bitmap = await createImageBitmap(video, {
+              resizeWidth: S,
+              resizeHeight: S,
+              resizeQuality: 'medium',
+            });
+          }
+
+          // Transfer bitmap ownership to worker (zero-copy, instant GC on main thread)
+          const msg: DetectMessage = {
+            type: 'detect',
+            frame: bitmap,
+            timestamp: performance.now(),
+            videoWidth: Wv,
+            videoHeight: Hv,
+            padX,
+            padY,
+            scale,
+            squareSize: S,
+          };
+
+          worker.postMessage(msg, [bitmap]);
+        } catch {
+          // Release lock if frame preparation encounters an error
+          isProcessingRef.current = false;
+        }
       }
 
       rafIdRef.current = requestAnimationFrame(renderLoop);
@@ -147,16 +192,15 @@ export function useDetectionLoop({
     return () => {
       cancelAnimationFrame(rafIdRef.current);
 
-      // Tell the worker to release the WASM heap and model
       worker.postMessage({ type: 'close' });
-
-      // Give the worker a moment to clean up, then terminate
       setTimeout(() => {
         worker.terminate();
       }, 100);
 
       workerRef.current = null;
       isProcessingRef.current = false;
+      letterboxCanvas = null;
+      letterboxCtx = null;
     };
   }, [isReady, enabled, videoRef]);
 

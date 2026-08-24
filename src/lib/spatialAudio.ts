@@ -1,4 +1,4 @@
-import type { Detection } from '@/workers/vision.worker';
+import type { TrackedDetection } from '@/lib/temporalTracker';
 
 // ─── Configuration ───
 const DEBOUNCE_MS = 3000;       // 3-second debounce per object class
@@ -27,17 +27,14 @@ export class SpatialAudioEngine {
    * MUST be called from a user gesture handler (click/tap) for Android Chrome.
    */
   async warmup(): Promise<void> {
-    // Create AudioContext on first user interaction to satisfy autoplay policy
     if (!this.audioCtx) {
       this.audioCtx = new AudioContext();
     }
 
-    // Resume if suspended (required after page load on most mobile browsers)
     if (this.audioCtx.state === 'suspended') {
       await this.audioCtx.resume();
     }
 
-    // Android Chrome SpeechSynthesis warmup — fire empty utterance
     if ('speechSynthesis' in window) {
       const emptyUtterance = new SpeechSynthesisUtterance('');
       window.speechSynthesis.speak(emptyUtterance);
@@ -45,12 +42,12 @@ export class SpatialAudioEngine {
   }
 
   /**
-   * Process new detections and trigger audio feedback for each.
+   * Process stabilized detections and trigger audio feedback for each.
    *
-   * @param detections - Array of detected objects from the worker
-   * @param frameWidth - Width of the detection frame (source coordinates)
+   * @param detections - Array of tracked objects from the worker
+   * @param frameWidth - Native width of the video stream
    */
-  announce(detections: Detection[], frameWidth: number): void {
+  announce(detections: TrackedDetection[], frameWidth: number): void {
     if (this.disposed || !this.audioCtx) return;
 
     const now = Date.now();
@@ -86,7 +83,6 @@ export class SpatialAudioEngine {
 
     const now = this.audioCtx.currentTime;
 
-    // Create oscillator → gain → panner → destination
     const oscillator = this.audioCtx.createOscillator();
     const gainNode = this.audioCtx.createGain();
     const pannerNode = new StereoPannerNode(this.audioCtx, { pan });
@@ -94,7 +90,6 @@ export class SpatialAudioEngine {
     oscillator.type = 'sine';
     oscillator.frequency.setValueAtTime(TONE_FREQUENCY, now);
 
-    // Quick attack, smooth release to avoid clicks
     gainNode.gain.setValueAtTime(0, now);
     gainNode.gain.linearRampToValueAtTime(TONE_VOLUME, now + 0.01);
     gainNode.gain.exponentialRampToValueAtTime(0.001, now + TONE_DURATION);
@@ -106,7 +101,6 @@ export class SpatialAudioEngine {
     oscillator.start(now);
     oscillator.stop(now + TONE_DURATION + 0.01);
 
-    // Self-cleanup after the tone finishes
     oscillator.onended = () => {
       oscillator.disconnect();
       gainNode.disconnect();
@@ -116,27 +110,22 @@ export class SpatialAudioEngine {
 
   /**
    * Speak an object name using the Web Speech API.
-   * Center-panned (browser limitation — cannot route through AudioContext).
    */
   private speak(text: string): void {
     if (!('speechSynthesis' in window)) return;
 
-    // Cancel any currently queued speech to avoid buildup
     if (window.speechSynthesis.speaking) {
       window.speechSynthesis.cancel();
     }
 
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.2;   // Slightly faster for responsiveness
+    utterance.rate = 1.2;
     utterance.pitch = 1.0;
     utterance.volume = 0.8;
 
     window.speechSynthesis.speak(utterance);
   }
 
-  /**
-   * Clean up all resources.
-   */
   dispose(): void {
     this.disposed = true;
 

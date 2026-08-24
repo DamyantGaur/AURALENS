@@ -5,7 +5,7 @@ import { useWebcam } from '@/hooks/useWebcam';
 import { useDetectionLoop } from '@/hooks/useDetectionLoop';
 import { drawDetections } from '@/lib/canvasRenderer';
 import { SpatialAudioEngine } from '@/lib/spatialAudio';
-import type { Detection } from '@/workers/vision.worker';
+import type { TrackedDetection } from '@/lib/temporalTracker';
 
 type AppState = 'idle' | 'starting' | 'running' | 'error';
 
@@ -18,7 +18,7 @@ export default function HomePage() {
 
   // ─── Detection callback: draw boxes + trigger audio ───
   const handleDetections = useCallback(
-    (detections: Detection[], sourceWidth: number, sourceHeight: number) => {
+    (detections: TrackedDetection[], nativeWidth: number, nativeHeight: number) => {
       setDetectionCount(detections.length);
 
       // Draw bounding boxes on canvas
@@ -26,13 +26,13 @@ export default function HomePage() {
       if (canvas && videoDimensions) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          drawDetections(ctx, detections, videoDimensions.width, videoDimensions.height, sourceWidth, sourceHeight);
+          drawDetections(ctx, detections, videoDimensions.width, videoDimensions.height, nativeWidth, nativeHeight);
         }
       }
 
       // Trigger spatial audio
       if (audioEngineRef.current && detections.length > 0) {
-        audioEngineRef.current.announce(detections, sourceWidth);
+        audioEngineRef.current.announce(detections, nativeWidth);
       }
     },
     [videoDimensions],
